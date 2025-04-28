@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+let instance;
+(async () => {
+  const response = await fetch('output.wasm');
+  const buffer = await response.arrayBuffer();
+
+  const wasmModule = await WebAssembly.instantiate(buffer, {
+    env: {
+      print: (ctx, ptr) => {
+        const memory = instance.exports.memory;
+        const buffer = new Uint8Array(memory.buffer);
+        let s = "";
+        while (buffer[ptr] !== 0) {
+          s += String.fromCharCode(buffer[ptr++]);
+        }
+        console.log(ctx, s);
+      }
+    }
+  });
+
+  instance = wasmModule.instance;
+  instance.exports.main(5);
+})();
+</script>
+</body>
+</html>
+
