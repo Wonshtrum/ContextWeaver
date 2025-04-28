@@ -2,7 +2,7 @@ use std::{collections::HashMap, env::args, fs::File, io::Write};
 use walrus::{
     ExportItem, FunctionBuilder, FunctionId, FunctionKind, InstrSeqBuilder, LocalFunction, LocalId,
     Module, ModuleConfig, ModuleLocals, ValType,
-    ir::{self, InstrSeq, InstrSeqId},
+    ir::{self, Instr, InstrSeq, InstrSeqId},
 };
 
 fn find_block(stack: &[(InstrSeqId, InstrSeqId)], id: InstrSeqId) -> Option<InstrSeqId> {
@@ -26,17 +26,17 @@ fn copy_seq(
     locals: &mut ModuleLocals,
 ) -> InstrSeqId {
     stack.push((seq.id(), builder.id()));
-    for (instr, _) in &seq.instrs {
-        if instr.is_br() {
-            let i = instr.unwrap_br();
+    seq.instrs.iter().for_each(|(instr, _)| match instr {
+        // block references
+        Instr::Br(i) => {
             let block = find_block(stack, i.block).unwrap();
             builder.br(block);
-        } else if instr.is_br_if() {
-            let i = instr.unwrap_br_if();
+        }
+        Instr::BrIf(i) => {
             let block = find_block(stack, i.block).unwrap();
             builder.br_if(block);
-        } else if instr.is_br_table() {
-            let i = instr.unwrap_br_table();
+        }
+        Instr::BrTable(i) => {
             let blocks = i
                 .blocks
                 .iter()
@@ -45,21 +45,22 @@ fn copy_seq(
                 .unwrap();
             let default = find_block(stack, i.default).unwrap();
             builder.br_table(blocks, default);
-        // =================================================
-        } else if instr.is_block() {
-            let i = instr.unwrap_block();
+        }
+
+        // sub blocks
+        Instr::Block(i) => {
             let block = func.block(i.seq);
             let mut block_builder = builder.dangling_instr_seq(block.ty);
             let seq = copy_seq(func, ctx, stack, maps, block, &mut block_builder, locals);
             builder.instr(ir::Block { seq });
-        } else if instr.is_loop() {
-            let i = instr.unwrap_loop();
+        }
+        Instr::Loop(i) => {
             let block = func.block(i.seq);
             let mut block_builder = builder.dangling_instr_seq(block.ty);
             let seq = copy_seq(func, ctx, stack, maps, block, &mut block_builder, locals);
             builder.instr(ir::Loop { seq });
-        } else if instr.is_if_else() {
-            let i = instr.unwrap_if_else();
+        }
+        Instr::IfElse(i) => {
             let consequent = func.block(i.consequent);
             let mut consequent_builder = builder.dangling_instr_seq(consequent.ty);
             let consequent = copy_seq(
@@ -86,26 +87,28 @@ fn copy_seq(
                 consequent,
                 alternative,
             });
-        // =================================================
-        } else if instr.is_local_get() {
-            let i = instr.unwrap_local_get();
+        }
+
+        // local mapping
+        Instr::LocalGet(i) => {
             let local = maps.locals.get(&i.local).unwrap();
             builder.local_get(*local);
-        } else if instr.is_local_set() {
-            let i = instr.unwrap_local_set();
+        }
+        Instr::LocalSet(i) => {
             let local = maps.locals.get(&i.local).unwrap();
             builder.local_set(*local);
-        } else if instr.is_local_tee() {
-            let i = instr.unwrap_local_tee();
+        }
+        Instr::LocalTee(i) => {
             let local = maps.locals.get(&i.local).unwrap();
             builder.local_tee(*local);
-        // =================================================
-        } else if instr.is_ref_func() {
-            let i = instr.unwrap_ref_func();
+        }
+
+        // function mapping
+        Instr::RefFunc(i) => {
             let func = maps.funcs.get(&i.func).unwrap();
             builder.ref_func(*func);
-        } else if instr.is_call() {
-            let i = instr.unwrap_call();
+        }
+        Instr::Call(i) => {
             if i.func == maps.ctx_get {
                 builder.local_get(ctx);
             } else if i.func == maps.ctx_set {
@@ -117,24 +120,26 @@ fn copy_seq(
                 builder.local_get(ctx);
                 builder.call(*func);
             }
-        } else if instr.is_return_call() {
-            let i = instr.unwrap_return_call();
+        }
+        Instr::ReturnCall(i) => {
             let func = maps.funcs.get(&i.func).unwrap();
             builder.local_get(ctx);
             builder.return_call(*func);
-        } else if instr.is_call_indirect() {
-            let i = instr.unwrap_call_indirect();
+        }
+        Instr::CallIndirect(i) => {
             builder.local_get(ctx);
             builder.unreachable();
-        } else if instr.is_return_call_indirect() {
-            let i = instr.unwrap_return_call_indirect();
+        }
+        Instr::ReturnCallIndirect(i) => {
             builder.local_get(ctx);
             builder.unreachable();
-        // =================================================
-        } else {
+        }
+
+        // untouched
+        _ => {
             builder.instr(instr.clone());
         }
-    }
+    });
     stack.pop().unwrap().1
 }
 

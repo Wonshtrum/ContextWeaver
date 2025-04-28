@@ -8,3 +8,9 @@ output.wasm: test.wasm
 
 output.wat: output.wasm
 	wasm2wat $^ > $@
+
+.PHONY: clean
+clean:
+	rm -f test.wasm
+	rm -f output.wat
+	rm -f output.wasm
